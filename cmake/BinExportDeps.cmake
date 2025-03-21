@@ -50,13 +50,17 @@ endif()
 
 # Abseil
 FetchContent_Declare(absl
-  URL https://github.com/abseil/abseil-cpp/archive/7e5c339b1aa790ae03cc614a8d7626d5b4831891.zip  # 2024-07-25 (RC2)
-  URL_HASH SHA256=2ad33d08a720fa3a67ec12bd8cf9846da7ed53045163d69047856cc671a0cbe5
+  URL https://github.com/abseil/abseil-cpp/archive/9f3d4d7c70db545ce6c69d92796f5ed811510b78.zip  # 2025-02-20
+  URL_HASH SHA256=77dd525ec246a5b5100ea0db138caca0e9857f5f1dfa8761f972ad834e24d679
 )
 set(ABSL_CXX_STANDARD ${CMAKE_CXX_STANDARD} CACHE STRING "" FORCE)
 set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
 set(ABSL_USE_EXTERNAL_GOOGLETEST ON CACHE BOOL "" FORCE)
 set(ABSL_FIND_GOOGLETEST OFF CACHE BOOL "" FORCE)
+if(MSVC)
+  # Link MSVCRT statically for abseil
+  set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+endif()
 if(BUILD_TESTING AND BINEXPORT_BUILD_TESTING)
   # Need this for absl::status_matchers to be available
   set(ABSL_BUILD_TESTING ON CACHE BOOL "" FORCE)
@@ -71,15 +75,17 @@ endif()
 # Protocol Buffers
 FetchContent_Declare(protobuf
   GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-  GIT_TAG        v27.2 # 2024-05-25 (must be a branch for GIT_SHALLOW to work)
-  GIT_SUBMODULES third_party/jsoncpp
-  GIT_SHALLOW    TRUE
+  GIT_TAG        e390402c5e372de349af88ae0197c67529cf9360 # 2025-02-22
 )
 set(protobuf_ABSL_PROVIDER "package" CACHE STRING "" FORCE)
 set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
 set(protobuf_WITH_ZLIB OFF CACHE BOOL "" FORCE)
+if(MSVC)
+  # Link MSVCRT statically for protoc
+  set(protobuf_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+endif()
 FetchContent_MakeAvailable(protobuf)
 binexport_check_target(protobuf::libprotobuf)
 binexport_check_target(protobuf::protoc)
@@ -93,14 +99,19 @@ find_package(Protobuf 3.14 REQUIRED) # Make protobuf_generate_cpp available
 
 # Binary Ninja API
 if(BINEXPORT_ENABLE_BINARYNINJA)
-  if(BINEXPORT_BINARYNINJA_CHANNEL STREQUAL "stable")
-    set(_binexport_binaryninjacore_suffix "_stable")
-    set(_binexport_binaryninja_git_tag
-        "59e569906828e91e4884670c2bba448702f5a31d") # 2023-09-19 v3.5.4526
+  if(BINEXPORT_BINARYNINJA_LATEST)
+    set(_binexport_binaryninjacore_suffix "_latest")
+    set(_binexport_binaryninja_git_tag "dev")
   else()
-    set(_binexport_binaryninjacore_suffix "")
-    set(_binexport_binaryninja_git_tag
-        "6e2b374dece03f6fb48a1615fa2bfee809ec2157") # 2023-09-24
+      if(BINEXPORT_BINARYNINJA_CHANNEL STREQUAL "stable")
+        set(_binexport_binaryninjacore_suffix "_stable")
+        set(_binexport_binaryninja_git_tag
+            "9229ebde590febc9635d824ae9284ae170dee9da") # 2024-11-20 v4.2.6455
+      else()
+        set(_binexport_binaryninjacore_suffix "")
+        set(_binexport_binaryninja_git_tag
+            "608bd9c1f305c7d2f6f4812ed4d406ac3f5ef67a") # 2025-03-14
+      endif()
   endif()
   FetchContent_Declare(binaryninjaapi
     GIT_REPOSITORY https://github.com/Vector35/binaryninja-api.git
@@ -110,8 +121,22 @@ if(BINEXPORT_ENABLE_BINARYNINJA)
   if(NOT binaryninjaapi_POPULATED)
     FetchContent_Populate(binaryninjaapi)  # For binaryninjaapi_SOURCE_DIR
   endif()
+  if(BINEXPORT_BINARYNINJA_LATEST)
+    if(WIN32)
+      find_program(POWERSHELL_PATH NAMES powershell pwsh)
+      set(_stub_command "${POWERSHELL_PATH} ${BINEXPORT_SOURCE_DIR}/binaryninja/stubs/regenerate-api-stubs.ps1")
+    else()
+      set(_stub_command "${BINEXPORT_SOURCE_DIR}/binaryninja/stubs/regenerate-api-stubs.sh")
+    endif()
+    add_custom_command(
+      OUTPUT ${BINEXPORT_SOURCE_DIR}/binaryninja/stubs/binaryninjacore${_binexport_binaryninjacore_suffix}.cc
+      COMMAND ${_stub_command} ${binaryninjaapi_SOURCE_DIR} latest
+      DEPENDS ${binaryninjaapi_SOURCE_DIR}/binaryninjacore.h
+      COMMENT "Updating stubs"
+    )
+  endif()
   add_library(binaryninjacore SHARED
-    binaryninja/stubs/binaryninjacore${_binexport_binaryninjacore_suffix}.cc
+    ${BINEXPORT_SOURCE_DIR}/binaryninja/stubs/binaryninjacore${_binexport_binaryninjacore_suffix}.cc
   )
   set_target_properties(binaryninjacore PROPERTIES
     SOVERSION 1
@@ -147,4 +172,3 @@ if(BINEXPORT_ENABLE_IDAPRO)
 endif()
 
 #set(BUILD_TESTING ${BINEXPORT_SAVE_BUILD_TESTING})
-
